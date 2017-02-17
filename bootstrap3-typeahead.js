@@ -68,6 +68,7 @@
     this.afterSelect = this.options.afterSelect;
     this.addItem = false;
     this.value = this.$element.val() || this.$element.text();
+    this.keyPressed = false;
   };
 
   Typeahead.prototype = {
@@ -167,7 +168,12 @@
 
       var worker = $.proxy(function () {
 
-        if ($.isFunction(this.source)) {
+        // Bloodhound (since 0.11) needs three arguments. 
+        // Two of them are callback functions (sync and async) for local and remote data processing
+        // see https://github.com/twitter/typeahead.js/blob/master/src/bloodhound/bloodhound.js#L132
+        if ($.isFunction(this.source) && this.source.length === 3) {
+          this.source(this.query, $.proxy(this.process, this), $.proxy(this.process, this));
+        } else if ($.isFunction(this.source)) {
           this.source(this.query, $.proxy(this.process, this));
         } else if (this.source) {
           this.process(this.source);
@@ -231,29 +237,39 @@
     },
 
     highlighter: function (item) {
-      var html = $('<div></div>');
-      var query = this.query;
-      var i = item.toLowerCase().indexOf(query.toLowerCase());
-      var len = query.length;
-      var leftPart;
-      var middlePart;
-      var rightPart;
-      var strong;
-      if (len === 0) {
-        return html.text(item).html();
+      var text = this.query;
+      if(text===""){
+        return item;
       }
-      while (i > -1) {
-        leftPart = item.substr(0, i);
-        middlePart = item.substr(i, len);
-        rightPart = item.substr(i + len);
-        strong = $('<strong></strong>').text(middlePart);
-        html
-          .append(document.createTextNode(leftPart))
-          .append(strong);
-        item = rightPart;
-        i = item.toLowerCase().indexOf(query.toLowerCase());
+      var matches = item.match(/(>)([^<]*)(<)/g);
+      var first = [];
+      var second = [];
+      var i;
+      if(matches && matches.length){
+        //html
+        for (i = 0; i < matches.length; ++i) {
+          if (matches[i].length > 2) {//escape '><'
+            first.push(matches[i]);
+          }
+        }
+      }else{
+        //text
+        first = [];
+        first.push(item);
       }
-      return html.append(document.createTextNode(item)).html();
+
+      var reg = new RegExp(text, "g");
+      var m;
+      for (i = 0; i < first.length; ++i) {
+        m = first[i].match(reg);
+        if(m && m.length>0){//find all text nodes matches
+          second.push(first[i]);
+        }
+      }
+      for (i = 0; i < second.length; ++i) {
+        item = item.replace(second[i],second[i].replace(reg, '<strong>$&</strong>'));
+      }
+      return item;
     },
 
     render: function (items) {
@@ -408,6 +424,7 @@
     },
 
     keydown: function (e) {
+      this.keyPressed = true;
       this.suppressKeyPressRepeat = ~$.inArray(e.keyCode, [40,38,9,13,27]);
       if (!this.shown && e.keyCode == 40) {
         this.lookup();
@@ -444,6 +461,9 @@
           break;
 
         case 9: // tab
+          if (!this.shown || (this.showHintOnFocus && !this.keyPressed)) return;
+          this.select();
+          break;
         case 13: // enter
           if (!this.shown) return;
           this.select();
@@ -455,12 +475,12 @@
           break;
       }
 
-
     },
 
     focus: function (e) {
       if (!this.focused) {
         this.focused = true;
+        this.keyPressed = false;
         if (this.options.showHintOnFocus && this.skipShowHintOnFocus !== true) {
           if(this.options.showHintOnFocus === "all") {
             this.lookup(""); 
@@ -478,6 +498,7 @@
       if (!this.mousedover && !this.mouseddown && this.shown) {
         this.hide();
         this.focused = false;
+        this.keyPressed = false;
       } else if (this.mouseddown) {
         // This is for IE that blurs the input when user clicks on scroll.
         // We set the focus back on the input and prevent the lookup to occur again
